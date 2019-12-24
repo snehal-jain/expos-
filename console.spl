@@ -1,0 +1,32 @@
+alias currentPID R15;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+backup;
+
+[TERMINAL_STATUS_TABLE] = 0;
+alias reqPID R5;
+reqPID = [TERMINAL_STATUS_TABLE + 1];
+
+alias process_table_entry R6;
+process_table_entry = PROCESS_TABLE + reqPID*16;
+
+//store P0 in buffer 
+[process_table_entry + 8] = P0;
+
+backup;
+
+R1 = RELEASE_TERMINAL;
+R2 = reqPID;
+
+call RESOURCE_MANAGER;
+
+restore;
+
+restore;
+
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 13];
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 9] = 0;
+ireturn;

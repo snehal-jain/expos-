@@ -1,0 +1,147 @@
+//process manager
+alias functionNum R1;
+alias currentPID R2;
+
+if (functionNum == GET_PCB_ENTRY) then
+  alias newPID R0;
+  newPID = 0;
+  while (newPID < 16) do
+    if ([PROCESS_TABLE + newPID*16 + 4] == TERMINATED) then
+      [PROCESS_TABLE + newPID*16 + 1] = newPID;
+      [PROCESS_TABLE + newPID*16 + 4] = ALLOCATED;
+      [PROCESS_TABLE + newPID*16 + 14] = PAGE_TABLE_BASE + newPID*20;
+      [PROCESS_TABLE + newPID*16 + 15] = 10;
+      break;
+    endif;
+    newPID = newPID + 1;
+  endwhile;
+
+  if (newPID == 16) then
+    newPID = -1;
+  endif;
+endif;
+
+if (functionNum == FREE_USER_AREA_PAGE) then
+  alias userAreaPageNum R8;
+  alias perprocess_rtable R9;
+
+  userAreaPageNum = [PROCESS_TABLE + currentPID*16 + 11];
+  perprocess_rtable=[PROCESS_TABLE + currentPID*16 + 11]*512+ (512-16);
+  alias counter R5;
+  counter=0;
+  while(counter<16)do
+      if([perprocess_rtable+counter]==SEMAPHORE)then
+      backup;
+
+      R1=RELEASE_SEMAPHORE;
+      //pid
+      R3=R2;
+      //semaphore table index
+      R2=[perprocess_rtable+counter+1];
+      call RESOURCE_MANAGER;
+      restore;
+      endif;
+      if([perprocess_rtable+counter]==FILE)then
+        backup;
+        R1=CLOSE;
+        R2=counter;
+        call FILE_MANAGER;
+        restore;
+      endif;  
+    counter=counter+2;
+
+    endwhile;  
+  backup;
+
+  R1 = RELEASE_PAGE;
+  R2 = userAreaPageNum;
+  call MEMORY_MANAGER;
+  restore;
+endif;
+
+if (functionNum == EXIT_PROCESS) then
+  if ([PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 9] != 9) then
+    alias counter R5;
+    counter = 1;
+    while (counter < 16) do
+      if ([PROCESS_TABLE + (counter * 16) + 4] == WAIT_PROCESS && [PROCESS_TABLE + (counter * 16) + 5] == [SYSTEM_STATUS_TABLE + 1]) then
+        [PROCESS_TABLE + (counter * 16) + 4] = READY;
+      endif;
+      if ([PROCESS_TABLE + (counter * 16) + 2] == [SYSTEM_STATUS_TABLE + 1]) then
+        [PROCESS_TABLE + (counter * 16) + 2] = -1;
+      endif;
+      counter = counter + 1;
+    endwhile;
+  endif;
+  backup;
+  R1 = FREE_PAGE_TABLE;
+  R2 = currentPID;
+  call PROCESS_MANAGER;
+  restore;
+
+  backup;
+  R1 = FREE_USER_AREA_PAGE;
+  R2 = currentPID;
+  call PROCESS_MANAGER;
+  restore;
+
+  [PROCESS_TABLE + currentPID*16 + 4] = TERMINATED;
+endif;
+
+if (functionNum == FREE_PAGE_TABLE) then
+  [PAGE_TABLE_BASE + currentPID*20 + 0] = -1;
+  [PAGE_TABLE_BASE + currentPID*20 + 1] = "0000";
+  [PAGE_TABLE_BASE + currentPID*20 + 2] = -1;
+  [PAGE_TABLE_BASE + currentPID*20 + 3] = "0000";
+
+  alias counter R5;
+  counter = 4;
+  while (counter < 20) do
+    if([PAGE_TABLE_BASE + currentPID*20 + counter] == -1) then
+      counter = counter + 2;
+      continue;
+    endif;
+
+    backup;
+    R1 = RELEASE_PAGE;
+    R2 = [PAGE_TABLE_BASE + currentPID*20 + counter];
+    call MEMORY_MANAGER;
+    restore;
+
+    [PAGE_TABLE_BASE + currentPID*20 + counter] = -1;
+    [PAGE_TABLE_BASE + currentPID*20 + counter + 1] = "0000";
+    counter = counter + 2;
+  endwhile;
+
+  counter = 2;
+  while (counter < 10) do
+    if ([DISK_MAP_TABLE + currentPID*10 + counter] == -1) then
+      counter = counter + 1;
+      if (counter == 4) then
+        counter = 8;
+      endif;
+      continue;
+    endif;
+
+    R3 = currentPID;
+    backup;
+    R1 = RELEASE_BLOCK;
+    R2 = [DISK_MAP_TABLE + currentPID*10 + counter];
+    call MEMORY_MANAGER;
+    restore;
+    [DISK_MAP_TABLE + currentPID*10 + counter] = -1;
+
+    counter = counter + 1;
+    if (counter == 4) then
+      counter = 8;
+    endif;
+  endwhile;
+
+  counter = 4;
+  while (counter < 8) do
+    [DISK_MAP_TABLE + currentPID*10 + counter] = -1;
+    counter = counter + 1;
+  endwhile;
+endif;
+
+return;

@@ -1,0 +1,147 @@
+alias currentPID R15;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+[PROCESS_TABLE + currentPID*16 + 9] = INT_FORK;
+
+alias userSP R5;
+userSP = SP;
+
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+alias physicalAddrRetval R14;
+physicalAddrRetval = [PTBR + 2*(userSP - 1)/512]*512 + (userSP - 1)%512;
+
+alias newPID R6;
+multipush(R5, R14, R15);
+R1 = GET_PCB_ENTRY;
+call PROCESS_MANAGER;
+multipop(R5, R14, R15);
+newPID = R0;
+
+if (newPID == -1) then
+    [physicalAddrRetval] = -1;
+    SP = userSP;
+    [PROCESS_TABLE + currentPID*16 + 9] = 0;
+    ireturn;
+endif;
+
+alias counter R7;
+alias entry R8;
+alias page R9;
+counter = 4;
+while (counter < 8) do
+    entry = PAGE_TABLE_BASE + currentPID*20 + counter;
+    if ([entry] == -1) then
+        multipush(R5, R6, R7, R8, R14, R15);
+        R1 = GET_FREE_PAGE;
+        call MEMORY_MANAGER;
+        multipop(R5, R6, R7, R8, R14, R15);
+        [entry] = R0;
+        [entry + 1] = "1110";
+    endif;
+    counter = counter + 2;
+endwhile;
+
+multipush(R5, R6, R14, R15);
+R1 = GET_FREE_PAGE;
+call MEMORY_MANAGER;
+multipop(R5, R6, R14, R15);
+[PAGE_TABLE_BASE + newPID*20 + 16] = R0;
+[PAGE_TABLE_BASE + newPID*20 + 17] = "0110";
+
+multipush(R5, R6, R14, R15);
+R1 = GET_FREE_PAGE;
+call MEMORY_MANAGER;
+multipop(R5, R6, R14, R15);
+[PAGE_TABLE_BASE + newPID*20 + 18] = R0;
+[PAGE_TABLE_BASE + newPID*20 + 19] = "0110";
+
+multipush(R5, R6, R14, R15);
+R1 = GET_FREE_PAGE;
+call MEMORY_MANAGER;
+multipop(R5, R6, R14, R15);
+[PROCESS_TABLE + newPID*16 + 11] = R0;
+page = R0;
+
+entry = PROCESS_TABLE + newPID*16;
+[entry] = 0;
+[entry + 2] = currentPID;
+[entry + 3] = [PROCESS_TABLE + currentPID*16 + 3];
+[entry + 4] = CREATED;
+
+[entry + 6] = [PROCESS_TABLE + currentPID*16 + 6];
+[entry + 7] = [PROCESS_TABLE + currentPID*16 + 7];
+[entry + 9] = 0;
+[entry + 10] = [PROCESS_TABLE + currentPID*16 + 10];
+[entry + 12] = 0;
+[entry + 13] = [PROCESS_TABLE + currentPID*16 + 13];
+
+alias UserAreaPagep R2;
+alias UserAreaPagec R3;
+
+UserAreaPagep = ([entry + 11]) * 512 + (512 - 16);       //semaphores
+UserAreaPagec = ([entry+ 11]) * 512 + (512 - 16);
+counter = 0;
+while(counter < 16) do
+    
+    //changes made in stage 22
+    [UserAreaPagec + counter] = [UserAreaPagep + counter];
+    [UserAreaPagec + counter + 1] = [UserAreaPagep + counter + 1];
+    if ([UserAreaPagep + counter] == SEMAPHORE) then                    //if semaphore then increase the process count
+        [SEMAPHORE_TABLE + 4 * [UserAreaPagep + counter + 1] + 1] = [SEMAPHORE_TABLE + 4 * [UserAreaPagep + counter + 1] + 1];
+    endif;
+    
+    //changes made in stage 24
+    if([UserAreaPagep+counter]==FILE)then
+        [OPEN_FILE_TABLE+ [UserAreaPagep + counter + 1]*4+1]=[OPEN_FILE_TABLE+ [UserAreaPagep + counter + 1]*4+1]+1;
+    endif;    
+    counter = counter + 2;
+
+endwhile;
+
+counter = 0;
+while (counter < 10) do
+  [DISK_MAP_TABLE + newPID*10 + counter] = [DISK_MAP_TABLE + currentPID*10 + counter];
+  counter = counter + 1;
+endwhile;
+
+
+counter = 4;
+[PAGE_TABLE_BASE + newPID*20] = 63;
+[PAGE_TABLE_BASE + newPID*20 + 1] = "0100";
+[PAGE_TABLE_BASE + newPID*20 + 2] = 64;
+[PAGE_TABLE_BASE + newPID*20 + 3] = "0100";
+while (counter < 16) do
+    page = [PAGE_TABLE_BASE + currentPID*20 + counter];
+    [PAGE_TABLE_BASE + newPID*20 + counter] = page;
+    [PAGE_TABLE_BASE + newPID*20 + counter + 1] = [PAGE_TABLE_BASE + currentPID*20 + counter + 1];
+    if (page != -1) then
+        [MEMORY_FREE_LIST + page] = [MEMORY_FREE_LIST + page] + 1;
+    endif;
+    counter = counter + 2;
+endwhile;
+
+counter = 0;
+page = [PAGE_TABLE_BASE + newPID*20 + 16];
+while (counter < 512) do
+    [page*512 + counter] = [[PAGE_TABLE_BASE + currentPID*20 + 16]*512 + counter];
+    counter = counter + 1;
+endwhile;
+
+counter = 0;
+page = [PAGE_TABLE_BASE + newPID*20 + 18];
+while (counter < 512) do
+    [page*512 + counter] = [[PAGE_TABLE_BASE + currentPID*20 + 18]*512 + counter];
+    counter = counter + 1;
+endwhile;
+
+[[PROCESS_TABLE + newPID*16 + 11]*512] = BP;
+[physicalAddrRetval] = newPID;
+
+physicalAddrRetval = [[PROCESS_TABLE + newPID*16 + 14] + 2*(userSP - 1)/512]*512 + (userSP - 1)%512;
+[physicalAddrRetval] = 0;
+
+
+SP = userSP;
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 9] = 0;
+ireturn;

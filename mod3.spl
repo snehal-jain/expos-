@@ -1,0 +1,125 @@
+alias functionNum R1;
+alias currentPID R2;
+if(functionNum==OPEN)then
+    breakpoint;
+    alias filename R4;
+    alias fileindex R7;
+    alias flag R8;
+    alias freeentry R9;
+    alias counter R3;
+    flag = 0;
+    counter=0;
+    fileindex = 0;				
+    freeentry = -1;
+    while (fileindex < 60) do
+	    if ([INODE_TABLE + fileindex * 16 + 1] == -1 && freeentry == -1) then
+		    freeentry = fileindex;
+	    endif;
+	    if ([INODE_TABLE + fileindex * 16 + 1] == filename) then
+		    flag = 1;
+		    break;
+	    endif;
+	    fileindex = fileindex + 1;
+    endwhile;
+   
+    backup;
+    R1=ACQUIRE_INODE;
+    R2=currentPID;
+    call RESOURCE_MANAGER;
+    restore;
+    if (R0 != 0) then
+        breakpoint;
+		return;
+	endif;
+    //only data files can be opened
+    if([OPEN_FILE_TABLE+currentPID*4+0]==EXEC)then 
+        backup;
+        R1=RELEASE_INODE;
+        R2=currentPID;
+        call RESOURCE_MANAGER;
+        restore;
+        
+		R0 = -1;
+		return;
+	endif;
+      
+    if(filename==ROOT)then
+        breakpoint;
+        [OPEN_FILE_TABLE+currentPID*4+0]=INODE_ROOT;
+    else
+        if([FILE_STATUS_TABLE+currentPID*4+1]==-1)then
+                breakpoint;
+                [FILE_STATUS_TABLE+currentPID*4+1]=1;
+        else
+            breakpoint;
+            [FILE_STATUS_TABLE+currentPID*4+1]=[FILE_STATUS_TABLE+currentPID*4+1]+1;
+            [OPEN_FILE_TABLE+currentPID*4+0]=fileindex;        
+        endif;
+    endif;
+    breakpoint;
+    [OPEN_FILE_TABLE+currentPID*4+1]=1;
+    [OPEN_FILE_TABLE+currentPID*4+2]=0;
+endif;
+if(functionNum==CLOSE)then
+    alias filename R4;
+    alias fileindex R7;
+    alias flag R8;
+    alias freeentry R9;
+      alias counter R3;
+    counter=0;
+    flag=0;
+    fileindex = 0;				
+    freeentry = -1;
+    while (fileindex < 60) do
+	    if ([INODE_TABLE + fileindex * 16 + 1] == -1 && freeentry == -1) then
+		    freeentry = fileindex;
+	    endif;
+	    if ([INODE_TABLE + fileindex * 16 + 1] == filename) then
+		    flag = 1;
+		    break;
+	    endif;
+	    fileindex = fileindex + 1;
+    endwhile;
+    [OPEN_FILE_TABLE+currentPID*4+1]= [OPEN_FILE_TABLE+currentPID*4+1]-1;
+    if([OPEN_FILE_TABLE+currentPID*4+1]==0)then
+        [OPEN_FILE_TABLE+currentPID*4+0]=-1;
+        [OPEN_FILE_TABLE+currentPID*4+2]=-1;
+        if( [OPEN_FILE_TABLE+currentPID*4+0]!=INODE_ROOT)then
+            [FILE_STATUS_TABLE+currentPID*4+1]=[FILE_STATUS_TABLE+currentPID*4+1]-1;
+        endif;
+        if([FILE_STATUS_TABLE+currentPID*4+1]==0)then
+            [FILE_STATUS_TABLE+currentPID*4+1]=-1;
+        endif;
+    endif;        
+endif;
+if(functionNum==BUFFERED_READ )then
+    alias buffNum R3;
+    alias diskbNum R4;
+    buffNum=(diskbNum%4);
+    backup;
+    R1=ACQUIRE_BUFFER;
+    R2=currentPID;
+    call RESOURCE_MANAGER;
+    restore;
+    if([BUFFER_TABLE]!=diskbNum)then
+        if([BUFFER_TABLE+1]!=-1)then
+
+            //write back the buffer contents
+            alias pagenum R3;
+            alias blocknum R4;
+            backup;
+            R1=DISK_STORE;
+            R2=currentPID;
+            R3=buffNum;
+            R4=diskbNum;
+            call DEVICE_MANAGER;
+            restore;
+
+            //set buffer table as clean
+            [BUFFER_TABLE+1]=-1;
+        endif;
+    //load the disk block into the buffer
+    
+    endif;
+endif;    
+return;            
